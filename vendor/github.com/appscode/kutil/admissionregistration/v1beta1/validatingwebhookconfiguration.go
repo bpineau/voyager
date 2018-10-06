@@ -90,8 +90,10 @@ func TryUpdateValidatingWebhookConfiguration(c kubernetes.Interface, name string
 	return
 }
 
-func UpdateValidatingWebhookCABundle(config *rest.Config, name string) error {
+func UpdateValidatingWebhookCABundle(config *rest.Config, name string, extraConditions ...watchtools.ConditionFunc) error {
 	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(ctx, kutil.GCTimeout)
+	defer cancel()
 
 	err := rest.LoadTLSFiles(config)
 	if err != nil {
@@ -110,10 +112,7 @@ func UpdateValidatingWebhookCABundle(config *rest.Config, name string) error {
 		},
 	}
 
-	_, err = watchtools.UntilWithSync(ctx,
-		lw,
-		&reg.ValidatingWebhookConfiguration{},
-		nil,
+	var conditions = append([]watchtools.ConditionFunc{
 		func(event watch.Event) (bool, error) {
 			switch event.Type {
 			case watch.Deleted:
@@ -132,7 +131,15 @@ func UpdateValidatingWebhookCABundle(config *rest.Config, name string) error {
 			default:
 				return false, fmt.Errorf("unexpected event type: %v", event.Type)
 			}
-		})
+		},
+	}, extraConditions...)
+
+	_, err = watchtools.UntilWithSync(ctx,
+		lw,
+		&reg.ValidatingWebhookConfiguration{},
+		nil,
+		conditions...,
+	)
 	return err
 }
 
